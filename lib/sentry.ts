@@ -412,12 +412,24 @@ export async function resolveProjectSlug(
 // Normalizers
 // ---------------------------------------------------------------------------
 
+const toNumber = (v: unknown): number => {
+  const n = typeof v === "number" ? v : Number(v);
+  return Number.isFinite(n) ? n : 0;
+};
+
+const toIso = (v: unknown): string | null => {
+  if (v == null) return null;
+  if (typeof v === "string") return v;
+  if (typeof v === "number") return new Date(v * 1000).toISOString();
+  return null;
+};
+
 function normalizeIssue(raw: RawIssue): SentryIssue {
   const topValues = (raw.tags ?? []).map((tag) => ({
     key: tag.key ?? "",
     topValues: (tag.topValues ?? []).map((top) => ({
       value: top.value ?? null,
-      count: top.count ?? 0,
+      count: toNumber(top.count),
     })),
   }));
   return {
@@ -427,10 +439,10 @@ function normalizeIssue(raw: RawIssue): SentryIssue {
     level: raw.level ?? "?",
     status: raw.status ?? "?",
     culprit: raw.culprit ?? null,
-    count: raw.count ?? 0,
-    userCount: raw.userCount ?? 0,
-    firstSeen: raw.firstSeen ?? null,
-    lastSeen: raw.lastSeen ?? null,
+    count: toNumber(raw.count),
+    userCount: toNumber(raw.userCount),
+    firstSeen: toIso(raw.firstSeen),
+    lastSeen: toIso(raw.lastSeen),
     permalink: raw.permalink ?? null,
     project: raw.project?.slug ? { slug: raw.project.slug } : null,
     metadata: raw.metadata
@@ -477,8 +489,8 @@ function normalizeEvent(raw: RawEvent): SentryEvent {
     id: raw.id ?? null,
     title: raw.title ?? null,
     message: raw.message ?? null,
-    dateCreated: raw.dateCreated ?? raw.timestamp ?? null,
-    project: raw.projectSlug ?? raw.projectID ?? null,
+    dateCreated: toIso(raw.dateCreated ?? raw.timestamp),
+    project: raw.projectSlug || (raw.projectID != null ? String(raw.projectID) : null),
     tags,
     contexts: Object.keys(contexts).length > 0 ? contexts : null,
     entries: (raw.entries ?? []).map((entry) =>
