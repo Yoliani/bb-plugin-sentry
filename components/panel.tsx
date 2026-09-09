@@ -171,9 +171,9 @@ function PanelPage() {
           project,
           period,
           limit: 50,
-          ...(status !== "" ? { status } : {}),
-          ...(level !== "" ? { level } : {}),
-          ...(query.trim() !== "" ? { query: query.trim() } : {}),
+          ...(status === "" ? {} : { status }),
+          ...(level === "" ? {} : { level }),
+          ...(query.trim() === "" ? {} : { query: query.trim() }),
         })
         .then(
           (result) => {
@@ -202,9 +202,9 @@ function PanelPage() {
         period,
         limit: 50,
         cursor: nextCursor,
-        ...(status !== "" ? { status } : {}),
-        ...(level !== "" ? { level } : {}),
-        ...(query.trim() !== "" ? { query: query.trim() } : {}),
+        ...(status === "" ? {} : { status }),
+        ...(level === "" ? {} : { level }),
+        ...(query.trim() === "" ? {} : { query: query.trim() }),
       })
       .then(
         (result) => {
@@ -367,7 +367,7 @@ function PanelPage() {
             {issues.length} issue{issues.length === 1 ? "" : "s"} ·{" "}
             {config.rootUrl} · {config.org}
           </span>
-          {nextCursor !== null ? (
+          {nextCursor === null ? null : (
             <Button
               variant="outline"
               size="sm"
@@ -377,7 +377,7 @@ function PanelPage() {
             >
               {loading ? "Loading…" : "Load more"}
             </Button>
-          ) : null}
+          )}
         </div>
       ) : null}
     </div>
