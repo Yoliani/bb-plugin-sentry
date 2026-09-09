@@ -490,7 +490,8 @@ function normalizeEvent(raw: RawEvent): SentryEvent {
     title: raw.title ?? null,
     message: raw.message ?? null,
     dateCreated: toIso(raw.dateCreated ?? raw.timestamp),
-    project: raw.projectSlug || (raw.projectID != null ? String(raw.projectID) : null),
+    project:
+      raw.projectSlug || (raw.projectID == null ? null : String(raw.projectID)),
     tags,
     contexts: Object.keys(contexts).length > 0 ? contexts : null,
     entries: (raw.entries ?? []).map((entry) =>
