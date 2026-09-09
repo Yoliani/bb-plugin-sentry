@@ -194,7 +194,7 @@ export interface IssueInput {
 
 type RcSections = Record<string, Record<string, string>>;
 
-function parseRc(content: string): RcSections {
+export function parseRc(content: string): RcSections {
   const sections: RcSections = { "": {} };
   let current = "";
   for (const rawLine of content.split("\n")) {
@@ -227,7 +227,7 @@ function mergeRc(sources: RcSections[]): RcSections {
 
 /** Read the home ~/.sentryclirc, if it exists. No repo-local layer here. */
 function loadRc(): RcSections {
-  const path = join(homedir(), ".sentryclirc");
+  const path = process.env.SENTRY_RC ?? join(homedir(), ".sentryclirc");
   if (!existsSync(path)) return {};
   try {
     return parseRc(readFileSync(path, "utf-8"));
@@ -240,7 +240,7 @@ function loadRc(): RcSections {
 // Config resolution
 // ---------------------------------------------------------------------------
 
-function detectBackend(rootUrl: string): "sentry" | "glitchtip" {
+export function detectBackend(rootUrl: string): "sentry" | "glitchtip" {
   try {
     const host = new URL(rootUrl).hostname;
     if (host === "sentry.io" || host.endsWith(".sentry.io")) return "sentry";
@@ -359,7 +359,7 @@ async function fetchJsonWithHeaders<T = unknown>(
  * Sentry and GlitchTip both advertise the next page this way. Returns null
  * when there is no next page, or the header is absent.
  */
-function nextCursorFromLink(link: string | null): string | null {
+export function nextCursorFromLink(link: string | null): string | null {
   if (!link) return null;
   for (const part of link.split(",")) {
     const cursor = part.match(/cursor="([^"]+)"/);
@@ -611,7 +611,7 @@ export async function listIssues(
   };
 }
 
-function parseIssueInput(value: string): {
+export function parseIssueInput(value: string): {
   org: string | null;
   issueId: string | null;
   shortId: string | null;
