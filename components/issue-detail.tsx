@@ -3,11 +3,12 @@
 // Fetches `issue_get` with `withLatest` so the newest event's stack trace,
 // request, tags, contexts, and breadcrumbs come back in one call. This is the
 // drill-down equivalent of the skill's `fetch-issue.js <id> --latest`.
-import { useCallback, useEffect, useState } from "react";
 import { useRpc } from "@get-bb/plugin-sdk/app";
 import type { BoardEvent, BoardIssue, rpcContract } from "../server";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
+import { cn } from "@/lib/utils";
+import { useResource } from "@/hooks/use-resource";
 
 interface Frame {
   filename?: string;
@@ -399,26 +400,11 @@ export function IssueDetail({
   onBack: () => void;
 }) {
   const rpc = useRpc<typeof rpcContract>();
-  const [data, setData] = useState<{
-    issue: BoardIssue;
-    event: BoardEvent | null;
-  } | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const report = useCallback((cause: unknown) => {
-    setError(cause instanceof Error ? cause.message : String(cause));
-  }, []);
-  const load = useCallback(() => {
-    rpc
-      .call("issue_get", { value: issueId, withLatest: true })
-      .then((result) => {
-        setData(result);
-        setError(null);
-      }, report);
-  }, [rpc, issueId, report]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
+  const detail = useResource(
+    () => rpc.call("issue_get", { value: issueId, withLatest: true }),
+    [rpc, issueId],
+  );
+  const data = detail.data;
 
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col">
@@ -438,28 +424,26 @@ export function IssueDetail({
           size="icon"
           className="ml-auto size-7"
           aria-label="Refresh"
-          onClick={load}
+          onClick={detail.reload}
         >
-          <Icon name="Loading" className="size-4" />
+          <Icon
+            name="Loading"
+            className={cn("size-4", detail.loading && "animate-spin")}
+          />
         </Button>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto pb-6">
-        {error === null ? (
-          data === null ? (
-            <p
-              role="status"
-              className="mx-4 mt-4 text-sm text-muted-foreground"
-            >
-              Loading issue…
-            </p>
-          ) : (
-            <DetailContent issue={data.issue} event={data.event} />
-          )
-        ) : (
+        {detail.error !== null ? (
           <p role="alert" className="mx-4 mt-4 text-sm text-destructive">
-            {error}
+            {detail.error}
           </p>
+        ) : data === null ? (
+          <p role="status" className="mx-4 mt-4 text-sm text-muted-foreground">
+            Loading issue…
+          </p>
+        ) : (
+          <DetailContent issue={data.issue} event={data.event} />
         )}
       </div>
     </div>

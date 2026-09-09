@@ -2,13 +2,14 @@
 //
 // Every call is RPC to the server (no token in the browser). Selecting an
 // issue swaps the panel for the detail view; a back button returns to the list.
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRpc } from "@get-bb/plugin-sdk/app";
 import type { BoardIssue, rpcContract } from "../server";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Icon } from "@/components/ui/icon";
 import { cn } from "@/lib/utils";
+import { useResource } from "@/hooks/use-resource";
 import { IssueDetail } from "@/components/issue-detail";
 
 interface ConfigInfo {
@@ -24,6 +25,11 @@ interface ProjectSummary {
   slug: string;
   id: string;
   name: string | null;
+}
+
+interface ListData {
+  issues: BoardIssue[];
+  nextCursor: string | null;
 }
 
 const PERIODS = ["24h", "7d", "14d", "30d"];
@@ -131,11 +137,16 @@ function PanelPage() {
   const [status, setStatus] = useState("unresolved");
   const [level, setLevel] = useState("");
   const [query, setQuery] = useState("");
-  const [issues, setIssues] = useState<BoardIssue[] | null>(null);
-  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [submittedQuery, setSubmittedQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Pages beyond the first: "Load more" appends here, reset by a fresh first page.
+  const [appended, setAppended] = useState<BoardIssue[]>([]);
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  // Bumped whenever a fresh first page lands, so an in-flight "Load more" can't
+  // append the previous filter's page onto the current list.
+  const generation = useRef(0);
 
   const report = useCallback((cause: unknown) => {
     setError(cause instanceof Error ? cause.message : String(cause));
@@ -162,67 +173,75 @@ function PanelPage() {
     );
   }, [rpc]);
 
-  const loadIssues = useCallback(
-    (showSpinner: boolean) => {
-      if (project === "") return;
-      if (showSpinner) setLoading(true);
-      rpc
-        .call("issues_list", {
-          project,
-          period,
-          limit: 50,
-          ...(status === "" ? {} : { status }),
-          ...(level === "" ? {} : { level }),
-          ...(query.trim() === "" ? {} : { query: query.trim() }),
-        })
-        .then(
-          (result) => {
-            setIssues(result.issues);
-            setNextCursor(result.nextCursor);
-            setError(null);
-            setLoading(false);
-          },
-          (cause) => {
-            report(cause);
-            setIssues([]);
-            setNextCursor(null);
-            setLoading(false);
-          },
-        );
-    },
-    [rpc, project, period, status, level, query, report],
+  // The issue list, re-read whenever a filter, window, or the submitted search
+  // changes. The submitted search is deliberately separate from the live `query`
+  // text: typing never fires a request per keystroke — only Enter (form submit)
+  // commits a search. That fixes the "8 requests to type 'database'" waste and,
+  // because this is a sequence-guarded read, a slow response for one filter can
+  // never paint over a newer one.
+  const list = useResource<ListData>(
+    () =>
+      project === ""
+        ? Promise.resolve({ issues: [], nextCursor: null })
+        : rpc.call("issues_list", {
+            project,
+            period,
+            limit: 50,
+            ...(status === "" ? {} : { status }),
+            ...(level === "" ? {} : { level }),
+            ...(submittedQuery.trim() === ""
+              ? {}
+              : { query: submittedQuery.trim() }),
+          }),
+    [rpc, project, period, status, level, submittedQuery],
   );
 
+  // A fresh first page (any filter change, or a refresh) resets pagination and
+  // invalidates any in-flight "Load more" so it can't append a stale page.
+  useEffect(() => {
+    if (list.data !== null) {
+      generation.current += 1;
+      setAppended([]);
+      setCursor(list.data.nextCursor);
+    }
+  }, [list.data]);
+
   const loadMore = useCallback(() => {
-    if (project === "" || nextCursor === null) return;
-    setLoading(true);
+    if (project === "" || cursor === null) return;
+    const gen = generation.current;
+    setLoadingMore(true);
     rpc
       .call("issues_list", {
         project,
         period,
         limit: 50,
-        cursor: nextCursor,
+        cursor,
         ...(status === "" ? {} : { status }),
         ...(level === "" ? {} : { level }),
-        ...(query.trim() === "" ? {} : { query: query.trim() }),
+        ...(submittedQuery.trim() === ""
+          ? {}
+          : { query: submittedQuery.trim() }),
       })
       .then(
         (result) => {
-          setIssues((current) => [...(current ?? []), ...result.issues]);
-          setNextCursor(result.nextCursor);
-          setError(null);
-          setLoading(false);
+          if (gen !== generation.current) {
+            setLoadingMore(false);
+            return;
+          }
+          setAppended((current) => [...current, ...result.issues]);
+          setCursor(result.nextCursor);
+          setLoadingMore(false);
         },
         (cause) => {
+          setLoadingMore(false);
           report(cause);
-          setLoading(false);
         },
       );
-  }, [rpc, project, period, status, level, query, nextCursor, report]);
+    // generation is a ref, not a dep: only a fresh first page bumps it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rpc, project, period, status, level, submittedQuery, cursor, report]);
 
-  useEffect(() => {
-    loadIssues(false);
-  }, [loadIssues]);
+  const issues = list.data === null ? null : [...list.data.issues, ...appended];
 
   if (config === null) return null;
 
@@ -310,12 +329,12 @@ function PanelPage() {
           size="icon"
           className="ml-auto size-7 text-muted-foreground hover:text-foreground"
           aria-label="Refresh issues"
-          disabled={loading}
-          onClick={() => loadIssues(true)}
+          disabled={list.loading}
+          onClick={list.reload}
         >
           <Icon
             name="Loading"
-            className={cn("size-4", loading && "animate-spin")}
+            className={cn("size-4", list.loading && "animate-spin")}
           />
         </Button>
       </div>
@@ -324,7 +343,7 @@ function PanelPage() {
         className="border-b border-border px-4 py-2 md:px-5"
         onSubmit={(event) => {
           event.preventDefault();
-          loadIssues(true);
+          setSubmittedQuery(query.trim());
         }}
       >
         <Input
@@ -343,7 +362,9 @@ function PanelPage() {
       )}
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {issues === null ? (
+        {list.error !== null ? (
+          <Notice tone="error">{list.error}</Notice>
+        ) : issues === null ? (
           <Notice>Loading issues…</Notice>
         ) : issues.length === 0 ? (
           <Notice>No issues match your filters.</Notice>
@@ -367,15 +388,15 @@ function PanelPage() {
             {issues.length} issue{issues.length === 1 ? "" : "s"} ·{" "}
             {config.rootUrl} · {config.org}
           </span>
-          {nextCursor === null ? null : (
+          {cursor === null ? null : (
             <Button
               variant="outline"
               size="sm"
               className="ml-auto"
-              disabled={loading}
+              disabled={loadingMore}
               onClick={loadMore}
             >
-              {loading ? "Loading…" : "Load more"}
+              {loadingMore ? "Loading…" : "Load more"}
             </Button>
           )}
         </div>
