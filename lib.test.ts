@@ -213,7 +213,9 @@ describe("link header pagination", () => {
   it("returns null with no next page or no header", () => {
     expect(nextCursorFromLink(null)).toBeNull();
     expect(
-      nextCursorFromLink('<https://sentry.io/a>; rel="previous"; cursor="0:0:1"'),
+      nextCursorFromLink(
+        '<https://sentry.io/a>; rel="previous"; cursor="0:0:1"',
+      ),
     ).toBeNull();
   });
 });
