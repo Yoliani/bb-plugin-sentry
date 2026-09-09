@@ -144,9 +144,11 @@ function PanelPage() {
   const [appended, setAppended] = useState<BoardIssue[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
-  // Bumped whenever a fresh first page lands, so an in-flight "Load more" can't
-  // append the previous filter's page onto the current list.
-  const generation = useRef(0);
+  // Monotonic sequence for "load more": bumped at the start of each request AND
+  // whenever a fresh first page lands, so only the most recent request may append
+  // or touch state. A stale response — filters changed, or the user clicked twice
+  // — is dropped entirely instead of clearing loading or showing an old error.
+  const loadMoreSeq = useRef(0);
 
   const report = useCallback((cause: unknown) => {
     setError(cause instanceof Error ? cause.message : String(cause));
@@ -196,20 +198,23 @@ function PanelPage() {
     [rpc, project, period, status, level, submittedQuery],
   );
 
-  // A fresh first page (any filter change, or a refresh) resets pagination and
-  // invalidates any in-flight "Load more" so it can't append a stale page.
+  // A fresh first page (any filter change, or a refresh) resets pagination, drops
+  // any in-flight "Load more", and clears a stale error from a previous attempt.
   useEffect(() => {
     if (list.data !== null) {
-      generation.current += 1;
+      loadMoreSeq.current += 1;
       setAppended([]);
       setCursor(list.data.nextCursor);
+      setLoadingMore(false);
+      setError(null);
     }
   }, [list.data]);
 
   const loadMore = useCallback(() => {
     if (project === "" || cursor === null) return;
-    const gen = generation.current;
+    const current = ++loadMoreSeq.current;
     setLoadingMore(true);
+    setError(null);
     rpc
       .call("issues_list", {
         project,
@@ -224,20 +229,19 @@ function PanelPage() {
       })
       .then(
         (result) => {
-          if (gen !== generation.current) {
-            setLoadingMore(false);
-            return;
-          }
-          setAppended((current) => [...current, ...result.issues]);
+          if (current !== loadMoreSeq.current) return;
+          setAppended((prev) => [...prev, ...result.issues]);
           setCursor(result.nextCursor);
           setLoadingMore(false);
         },
         (cause) => {
+          if (current !== loadMoreSeq.current) return;
           setLoadingMore(false);
           report(cause);
         },
       );
-    // generation is a ref, not a dep: only a fresh first page bumps it.
+    // loadMoreSeq is a ref, not a dep: it bumps on each request and each fresh
+    // first page.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rpc, project, period, status, level, submittedQuery, cursor, report]);
 
